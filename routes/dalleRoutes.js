@@ -1,45 +1,50 @@
 import express from 'express';
 import * as dotenv from 'dotenv';
 import axios from 'axios';
+import FormData from 'form-data';
 
 dotenv.config();
 
 const router = express.Router();
 
-// Simple GET route for testing
-router.route('/').get((req, res) => {
+// GET route for testing
+router.get('/', (req, res) => {
   res.status(200).json({ message: 'Hello from Stability AI!' });
 });
 
-// POST route for image generation
-router.route('/').post(async (req, res) => {
+// POST route for image generation using Stability AI
+router.post('/', async (req, res) => {
   try {
     const { prompt } = req.body;
+    if (!prompt || prompt.trim() === "") {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
 
-    // Define your engine ID (adjust if needed)
-    const engineId = 'stable-diffusion-512-v2-1';
+    // Create a FormData instance and append the required parameters
+    const form = new FormData();
+    form.append('prompt', prompt);
+    // Optional: set additional parameters as needed:
+    // form.append('aspect_ratio', '1:1');
+    // form.append('cfg_scale', '7');
+    // form.append('steps', '30');
+    form.append('output_format', 'png'); // or jpeg, webp
 
-    // Make the POST request to Stability AI's API
-    const response = await axios.post(
-      `https://api.stability.ai/v1/generation/${engineId}/text-to-image`,
-      {
-        text_prompts: [{ text: prompt }],
-        cfg_scale: 7,           // Adjust configuration scale if desired
-        height: 1024,           // You can adjust height/width as supported by your chosen engine
-        width: 1024,
-        samples: 1,
-        steps: 30,              // Number of diffusion steps (adjust per API documentation)
+    // Choose the endpoint you want to use:
+    // For Stable Image Core:
+    const endpoint = 'https://api.stability.ai/v2beta/stable-image/generate/core';
+    // For Stable Image Ultra, change endpoint to:
+    // const endpoint = 'https://api.stability.ai/v2beta/stable-image/generate/ultra';
+
+    // Make the POST request to Stability AI
+    const response = await axios.post(endpoint, form, {
+      headers: {
+        ...form.getHeaders(),
+        Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
+        Accept: 'application/json', // to receive JSON response with base64 image
       },
-      {
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'application/json',
-          Authorization: `Bearer ${process.env.STABILITY_API_KEY}`,
-        },
-      }
-    );
+    });
 
-    // Stability AI returns an "artifacts" array containing generated images
+    // Stability AI returns an artifacts array containing the generated image(s)
     const artifact = response.data.artifacts && response.data.artifacts[0];
     if (!artifact || !artifact.base64) {
       throw new Error('No image was generated.');
@@ -47,11 +52,10 @@ router.route('/').post(async (req, res) => {
     const base64Image = artifact.base64;
     res.status(200).json({ photo: `data:image/png;base64,${base64Image}` });
   } catch (error) {
-    console.error(error);
-    // Return the error message as JSON
+    console.error('Error generating image:', error.response ? error.response.data : error.message);
     res.status(500).json({
       error:
-        error?.response?.data ||
+        error?.response?.data?.error?.message ||
         error.message ||
         'Something went wrong with Stability AI',
     });
